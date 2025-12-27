@@ -1,0 +1,16 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/git-init.cmd
+/.vs
+/TtcTransit.Api/bin/Debug/net8.0
+/TtcTransit.Api/obj
+/TtcTransit.Data/bin/Debug/net8.0
+/TtcTransit.Data/obj
+/TtcTransit.Domain/bin/Debug/net8.0
+/TtcTransit.Domain/obj
+/TtcTransit.Import/bin/Debug/net8.0
+/TtcTransit.Import/obj
+/TtcTransit.Web/bin/Debug/net8.0
+/TtcTransit.Web/obj
