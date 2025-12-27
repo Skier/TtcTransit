@@ -1,0 +1,78 @@
+﻿@model IEnumerable<TtcTransit.Web.Models.RouteViewModel>
+
+<h2>Routes</h2>
+
+@if (!Model.Any())
+{
+    <p>No routes found. Make sure GTFS has been imported and that Web is pointing to the correct API URL.</p>
+}
+else
+{
+    <p>
+        <a href="@Url.Action("Index", "Realtime")" class="btn btn-outline-warning btn-sm">
+            View realtime delays (top 100)
+        </a>
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Short</th>
+                <th>Long</th>
+                <th class="text-center">Type</th>
+                <th>Color</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model)
+            {
+                <tr>
+                    <td>@r.Id</td>
+                    <td>
+                        <a href="@Url.Action("Stops", "Route", new { id = r.Id })">
+                            @r.ShortName
+                        </a>
+                    </td>
+                    <td>@r.LongName</td>
+
+                    <td class="text-center">
+                        @{
+                            string icon = "";
+                            string title = "";
+
+                            if (r.RouteType is int t)
+                            {
+                                (icon, title) = t switch
+                                {
+                                    0 => ("🚋", "Streetcar / Light Rail"),
+                                    1 => ("🚇", "Subway"),
+                                    3 => ("🚍", "Bus"),
+                                    _ => ("❓", $"Type {t}")
+                                };
+                            }
+                        }
+
+                        @if (!string.IsNullOrEmpty(icon))
+                        {
+                            <span title="@title">@icon</span>
+                        }
+                    </td>
+
+                    <td style="width: 80px;">
+                        @if (!string.IsNullOrWhiteSpace(r.Color))
+                        {
+                            <div style="
+                            background-color: #@r.Color;
+                            width: 70px;
+                            height: 24px;
+                            border-radius: 4px;
+                            border: 1px solid #ccc;">
+                            </div>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

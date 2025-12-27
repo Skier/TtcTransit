@@ -1,0 +1,66 @@
+﻿@model IEnumerable<TtcTransit.Web.Models.StopViewModel>
+
+@{
+    var routeId = ViewBag.RouteId as string ?? "";
+
+    // Группируем по направлению и сортируем
+    var groups = Model
+        .OrderBy(s => s.DirectionId ?? -1)
+        .ThenBy(s => s.Sequence)
+        .GroupBy(s => s.DirectionId ?? -1);
+}
+
+<h2>Stops for route @routeId</h2>
+
+<p>
+    <a href="@Url.Action("Index", "Home")" class="btn btn-secondary btn-sm">← Back to routes</a>
+</p>
+
+@if (!Model.Any())
+{
+    <p>No stops found for this route.</p>
+}
+else
+{
+    @foreach (var g in groups)
+    {
+        var dir = g.Key;
+        string dirTitle = dir switch
+        {
+            0 => "Direction 0",
+            1 => "Direction 1",
+            -1 => "No direction",
+            _ => $"Direction {dir}"
+        };
+
+        <h4>@dirTitle</h4>
+
+        <table class="table table-sm">
+            <thead>
+            <tr>
+                <th>#</th>
+                <th>Stop Id</th>
+                <th>Name</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var s in g.OrderBy(x => x.Sequence))
+            {
+                <tr>
+                    <td>@s.Sequence</td>
+                    <td>@s.Id</td>
+                    <td>
+                        <a href="@Url.Action("Details", "Stop", new { id = s.Id })">
+                            @s.Name
+                        </a>
+                    </td>
+                    <td>@(s.Latitude?.ToString("F6") ?? "")</td>
+                    <td>@(s.Longitude?.ToString("F6") ?? "")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+}

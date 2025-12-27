@@ -1,0 +1,45 @@
+﻿@model IEnumerable<TtcTransit.Web.Models.RealtimeDelayViewModel>
+
+@{
+    ViewData["Title"] = "Realtime delays";
+}
+
+<h2>Realtime delays (top @Model.Count())</h2>
+
+<p>
+    <a href="@Url.Action("Index", "Home")" class="btn btn-secondary btn-sm">← Back to routes</a>
+</p>
+
+@if (!Model.Any())
+{
+    <p><em>No realtime delays found (feed may be empty or not configured).</em></p>
+}
+else
+{
+    <table class="table table-sm table-striped">
+        <thead>
+        <tr>
+            <th>Route</th>
+            <th>Stop</th>
+            <th>Scheduled</th>
+            <th>Actual</th>
+            <th>Delay</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var d in Model)
+        {
+            var delayMin = d.DelaySeconds / 60.0;
+            <tr>
+                <td>@d.RouteShortName (@d.RouteId)</td>
+                <td>@d.StopName (@d.StopId)</td>
+                <td>@d.ScheduledTime.ToString("HH:mm:ss")</td>
+                <td>@d.ActualTime.ToString("HH:mm:ss")</td>
+                <td class="@(delayMin >= 5 ? "text-danger" : "text-warning")">
+                    @delayMin:F1 min
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}

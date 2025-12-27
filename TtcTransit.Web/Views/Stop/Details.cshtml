@@ -1,0 +1,128 @@
+﻿@model TtcTransit.Web.Models.StopDetailsViewModel
+@using TtcTransit.Web.Models
+
+@{
+    var stopId = Model.StopId;
+    var date = Model.Date;
+
+    var scheduleGroups = Model.Schedule
+        .OrderBy(x => x.RouteShortName)
+        .ThenBy(x => x.DirectionId ?? 0)
+        .ThenBy(x => x.ArrivalTime)
+        .GroupBy(x => new { x.RouteId, x.RouteShortName, x.DirectionId, x.RouteLongName });
+}
+
+@functions {
+    // Ищем realtime по ДВУМ ключам: StopId + TripId
+    private RealtimeStopArrivalViewModel? FindRealtimeFor(
+        StopScheduleItemViewModel sched,
+        IEnumerable<RealtimeStopArrivalViewModel> realtime)
+    {
+        return realtime
+            .FirstOrDefault(r =>
+                string.Equals(r.StopId, sched.StopId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.TripId, sched.TripId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Текст задержки = realtime - расписание
+    private string FormatDelay(
+        RealtimeStopArrivalViewModel rt,
+        DateOnly date,
+        string scheduledStr)
+    {
+        if (!TimeSpan.TryParse(scheduledStr, out var ts))
+            return "";
+
+        var schedDt = new DateTime(date.Year, date.Month, date.Day, ts.Hours, ts.Minutes, ts.Seconds);
+        var schedDto = new DateTimeOffset(schedDt, rt.ArrivalTime.Offset);
+
+        var delayMinutes = (int)Math.Round((rt.ArrivalTime - schedDto).TotalMinutes);
+
+        if (delayMinutes == 0) return "on time";
+        if (delayMinutes > 0) return $"+{delayMinutes} min";
+        return $"{delayMinutes} min";
+    }
+
+    // CSS-класс для подсветки задержки
+    private string GetDelayCssClass(
+        RealtimeStopArrivalViewModel rt,
+        DateOnly date,
+        string scheduledStr)
+    {
+        if (!TimeSpan.TryParse(scheduledStr, out var ts))
+            return "";
+
+        var schedDt = new DateTime(date.Year, date.Month, date.Day, ts.Hours, ts.Minutes, ts.Seconds);
+        var schedDto = new DateTimeOffset(schedDt, rt.ArrivalTime.Offset);
+
+        var delayMinutes = (int)Math.Round((rt.ArrivalTime - schedDto).TotalMinutes);
+
+        if (delayMinutes == 0) return "text-success";
+        if (delayMinutes > 5) return "text-danger";
+        if (delayMinutes > 0) return "text-warning";
+        return "";
+    }
+}
+
+<h2>Schedule for stop @stopId (@date.ToString("yyyy-MM-dd"))</h2>
+
+<p>
+    <a href="@Url.Action("Index", "Home")" class="btn btn-secondary btn-sm">← Back to routes</a>
+</p>
+
+@if (!Model.Schedule.Any())
+{
+    <p>No scheduled trips for this stop on this day.</p>
+}
+else
+{
+    @foreach (var g in scheduleGroups)
+    {
+        string dirTitle = g.Key.DirectionId switch
+        {
+            0 => "Direction 0",
+            1 => "Direction 1",
+            null => "No direction",
+            _ => $"Direction {g.Key.DirectionId}"
+        };
+
+        <h4>@g.Key.RouteShortName — @g.Key.RouteLongName (@dirTitle)</h4>
+
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Scheduled</th>
+                    <th>Realtime</th>
+                    <th>Delay</th>
+                    <th>Trip</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in g)
+                {
+                    // Жёсткий матч: stop_id + trip_id
+                    var rt = FindRealtimeFor(item, Model.Realtime);
+
+                    string realtimeText = rt != null
+                    ? rt.ArrivalTime.ToString("HH:mm")
+                    : "-";
+
+                    string delayText = rt != null
+                    ? FormatDelay(rt, date, item.ArrivalTime)
+                    : "";
+
+                    string delayClass = rt != null
+                    ? GetDelayCssClass(rt, date, item.ArrivalTime)
+                    : "";
+
+                    <tr>
+                        <td>@item.ArrivalTime</td>
+                        <td>@realtimeText</td>
+                        <td class="@delayClass">@delayText</td>
+                        <td>@item.TripId</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
