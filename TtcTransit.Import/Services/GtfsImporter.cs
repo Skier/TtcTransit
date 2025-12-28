@@ -20,7 +20,7 @@ public sealed class GtfsImporter
         Directory.CreateDirectory(dataDir);
 
         _sqlitePath = Path.Combine(dataDir, "gtfs.sqlite");
-        _zipPath = Path.Combine(dataDir, "gtfs.zip");
+        _zipPath = Path.Combine(dataDir, "..", "gtfs.zip");
     }
 
     public async Task ImportAsync(CancellationToken ct)

@@ -13,6 +13,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TtcTransit.Web", "TtcTransi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TtcTransit.Import", "TtcTransit.Import\TtcTransit.Import.csproj", "{E6DDE8A0-8823-4381-90C6-C274B0C47E6A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{E4927608-0C42-4D9B-965A-8783AB5B78AA}"
+	ProjectSection(SolutionItems) = preProject
+		Dockerfile.api = Dockerfile.api
+		Dockerfile.web = Dockerfile.web
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Data", "Data", "{26B804A2-C13F-4464-A345-68B05E312ACC}"
+	ProjectSection(SolutionItems) = preProject
+		Data\gtfs.sqlite = Data\gtfs.sqlite
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

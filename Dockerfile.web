@@ -1,0 +1,28 @@
+# 1. Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY TtcTransit.sln ./
+COPY TtcTransit.Domain/TtcTransit.Domain.csproj TtcTransit.Domain/
+COPY TtcTransit.Data/TtcTransit.Data.csproj TtcTransit.Data/
+COPY TtcTransit.Web/TtcTransit.Web.csproj TtcTransit.Web/
+
+RUN dotnet restore TtcTransit.Web/TtcTransit.Web.csproj
+
+COPY . .
+
+RUN dotnet publish TtcTransit.Web/TtcTransit.Web.csproj -c Release -o /app/publish
+
+# 2. Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+WORKDIR /app
+
+# Data Ч чтобы Web тоже при желании мог ходить к Ѕƒ (если нужно)
+COPY Data ./Data
+
+COPY --from=build /app/publish .
+
+ENV GTFS_DB_PATH=/app/Data/gtfs.sqlite
+ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT}
+
+ENTRYPOINT ["dotnet", "TtcTransit.Web.dll"]
