@@ -14,3 +14,6 @@
 /TtcTransit.Import/obj
 /TtcTransit.Web/bin/Debug/net8.0
 /TtcTransit.Web/obj
+/Data/gtfs.zip
+/Data/gtfs.sqlite
+/TtcTransit.zip
