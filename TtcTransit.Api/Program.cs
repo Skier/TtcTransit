@@ -232,4 +232,111 @@ app.MapGet("/api/realtime/delays",
         return Results.Ok(ordered);
     });
 
+// --- ESP32: plain text список ближайших прибытии? ---
+// GET /api/esp/next.txt?stops=STOP1,STOP2&max=10
+app.MapGet("/api/esp/next.txt",
+    async (string stops,
+           int? max,
+           GtfsRealtimeClient rtClient,
+           IRouteRepository routeRepo,
+           CancellationToken ct) =>
+    {
+        // Парсим список остановок из строки "STOP1,STOP2,STOP3"
+        var stopIds = stops
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (stopIds.Count == 0)
+            return Results.Text("", "text/plain");
+
+        var stopSet = new HashSet<string>(stopIds, StringComparer.OrdinalIgnoreCase);
+
+        int maxResults = max is > 0 and <= 50 ? max.Value : 10;
+
+        // 1. Получаем realtime-прибытия
+        var allArrivals = await rtClient.GetAllArrivalsAsync(ct);
+
+        if (allArrivals.Count == 0)
+            return Results.Text("", "text/plain");
+
+        // 2. Фильтруем по stop_id
+        var now = DateTimeOffset.Now;
+
+        var forStops = allArrivals
+            .Where(a => stopSet.Contains(a.StopId))
+            .Select(a => new
+            {
+                Arrival = a,
+                Minutes = (int)Math.Round((a.ArrivalTime - now).TotalMinutes)
+            })
+            .Where(x => x.Minutes >= 0) // убираем уже прошедшие
+            .OrderBy(x => x.Minutes)    // сортировка по ближайшему времени
+            .ToList();
+
+        if (forStops.Count == 0)
+            return Results.Text("", "text/plain");
+
+        // 3. Короткие имена маршрутов
+        var routeNames = new Dictionary<string, string>();
+        await foreach (var r in routeRepo.GetAllAsync(ct))
+        {
+            var key = r.Id;
+            var value = string.IsNullOrWhiteSpace(r.ShortName) ? r.Id : r.ShortName;
+            routeNames[key] = value;
+        }
+
+        var lines = new List<string>();
+
+        foreach (var x in forStops)
+        {
+            var a = x.Arrival;
+            var minutes = x.Minutes;
+            if (minutes < 0)
+                continue;
+
+            // Имя маршрута
+            routeNames.TryGetValue(a.RouteId, out var routeShortRaw);
+            var routeShort = string.IsNullOrWhiteSpace(routeShortRaw)
+                ? a.RouteId
+                : routeShortRaw;
+
+            // Буква направления
+            string dirLetter = a.DirectionId switch
+            {
+                0 => "E",
+                1 => "W",
+                _ => ""
+            };
+
+            var label = string.IsNullOrEmpty(dirLetter)
+                ? routeShort
+                : $"{routeShort}{dirLetter}";
+
+            // Базовая строка
+            var text = $"{label} - {minutes} min";
+
+            // Ограничение длины строки
+            if (text.Length > 20)
+            {
+                // упрощенный вариант
+                text = $"{label} {minutes}m";
+
+                if (text.Length > 20)
+                    text = text.Substring(0, 20);
+            }
+
+            lines.Add(text);
+
+            if (lines.Count >= maxResults)
+                break;
+        }
+
+        // Итоговый plain-text ответ
+        var resultText = string.Join("\n", lines);
+
+        return Results.Text(resultText, "text/plain");
+    });
+
 app.Run();
