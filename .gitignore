@@ -18,3 +18,6 @@
 /Data/gtfs.sqlite
 /TtcTransit.zip
 /gtfs.zip
+/Data/gtfs.sqlite-shm
+/Data/gtfs.sqlite-wal
+/gtfs.zip.bak
