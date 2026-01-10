@@ -1,7 +1,10 @@
+using Microsoft.Data.Sqlite;
 using System.Globalization;
 using TtcTransit.Api.Realtime;
 using TtcTransit.Data;
+using TtcTransit.Data.Repositories;
 using TtcTransit.Domain.Repositories;
+using static System.Net.Mime.MediaTypeNames;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -232,7 +235,8 @@ app.MapGet("/api/realtime/delays",
         return Results.Ok(ordered);
     });
 
-// --- ESP32: plain text список ближайших прибытии? ---
+// GET /api/esp/next.txt?stops=STOP1,STOP2&max=10
+// Plain-text endpoint for ESP32: nearest arrivals for given stops
 // GET /api/esp/next.txt?stops=STOP1,STOP2&max=10
 app.MapGet("/api/esp/next.txt",
     async (string stops,
@@ -241,7 +245,7 @@ app.MapGet("/api/esp/next.txt",
            IRouteRepository routeRepo,
            CancellationToken ct) =>
     {
-        // Парсим список остановок из строки "STOP1,STOP2,STOP3"
+        // 1. Парсим список stop_id из query: "STOP1,STOP2,STOP3"
         var stopIds = stops
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -249,21 +253,20 @@ app.MapGet("/api/esp/next.txt",
             .ToList();
 
         if (stopIds.Count == 0)
-            return Results.Text("", "text/plain");
+            return Results.Text(string.Empty, "text/plain");
 
         var stopSet = new HashSet<string>(stopIds, StringComparer.OrdinalIgnoreCase);
 
         int maxResults = max is > 0 and <= 50 ? max.Value : 10;
 
-        // 1. Получаем realtime-прибытия
+        // 2. Берём все realtime-прибытия
         var allArrivals = await rtClient.GetAllArrivalsAsync(ct);
-
         if (allArrivals.Count == 0)
-            return Results.Text("", "text/plain");
+            return Results.Text(string.Empty, "text/plain");
 
-        // 2. Фильтруем по stop_id
         var now = DateTimeOffset.Now;
 
+        // 3. Фильтруем по нужным остановкам и считаем минуты до прибытия
         var forStops = allArrivals
             .Where(a => stopSet.Contains(a.StopId))
             .Select(a => new
@@ -271,14 +274,14 @@ app.MapGet("/api/esp/next.txt",
                 Arrival = a,
                 Minutes = (int)Math.Round((a.ArrivalTime - now).TotalMinutes)
             })
-            .Where(x => x.Minutes >= 0) // убираем уже прошедшие
+            .Where(x => x.Minutes > 0) // только будущие рейсы
             .OrderBy(x => x.Minutes)    // сортировка по ближайшему времени
             .ToList();
 
         if (forStops.Count == 0)
-            return Results.Text("", "text/plain");
+            return Results.Text(string.Empty, "text/plain");
 
-        // 3. Короткие имена маршрутов
+        // 4. Словарь route_id -> short_name (или route_id, если short_name пустой)
         var routeNames = new Dictionary<string, string>();
         await foreach (var r in routeRepo.GetAllAsync(ct))
         {
@@ -287,44 +290,66 @@ app.MapGet("/api/esp/next.txt",
             routeNames[key] = value;
         }
 
+        // 5. Собираем нужные trip_id
+        var tripIds = forStops
+            .Select(x => x.Arrival.TripId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // 6. Грузим trip_headsign для нужных trip_id из SQLite
+        var tripHeadsigns = await LoadTripHeadsignsAsync(tripIds, ct);
+
         var lines = new List<string>();
 
         foreach (var x in forStops)
         {
             var a = x.Arrival;
             var minutes = x.Minutes;
-            if (minutes < 0)
-                continue;
 
-            // Имя маршрута
+            // route short name (из routes.txt)
             routeNames.TryGetValue(a.RouteId, out var routeShortRaw);
             var routeShort = string.IsNullOrWhiteSpace(routeShortRaw)
                 ? a.RouteId
                 : routeShortRaw;
 
-            // Буква направления
-            string dirLetter = a.DirectionId switch
+            string? labelRoute = routeShort;
+            string? labelDir = null;
+
+            if (!string.IsNullOrWhiteSpace(a.TripId)
+                && tripHeadsigns.TryGetValue(a.TripId, out var headsign)
+                && !string.IsNullOrWhiteSpace(headsign))
             {
-                0 => "E",
-                1 => "W",
-                _ => ""
-            };
+                var parsed = ParseTripHeadsign(headsign);
 
-            var label = string.IsNullOrEmpty(dirLetter)
-                ? routeShort
-                : $"{routeShort}{dirLetter}";
+                if (!string.IsNullOrWhiteSpace(parsed.RouteVariant))
+                    labelRoute = parsed.RouteVariant;
 
-            // Базовая строка
-            var text = $"{label} - {minutes} min";
+                if (!string.IsNullOrWhiteSpace(parsed.Direction))
+                    labelDir = parsed.Direction;
+            }
 
-            // Ограничение длины строки
+            // Fallback по DirectionId, если направление не удалось взять из headsign
+            if (string.IsNullOrWhiteSpace(labelDir))
+            {
+                labelDir = DirectionFromId(a.DirectionId);
+            }
+
+            // Формируем текстовую метку маршрута:
+            // "13A South" или "512 West" или просто "512"
+            string label = labelRoute ?? routeShort;
+            if (!string.IsNullOrWhiteSpace(labelDir))
+                label = $"{label} {labelDir}";
+
+            // Базовая строка: "13A South - 5m"
+            var text = $"{label} - {minutes}m";
+
+            // Ограничиваем длину 20 символами
             if (text.Length > 20)
             {
-                // упрощенный вариант
-                text = $"{label} {minutes}m";
+                // Укороченный вариант: без " - "
+                text = $"{labelRoute ?? routeShort} {minutes}m";
 
-                if (text.Length > 20)
-                    text = text.Substring(0, 20);
             }
 
             lines.Add(text);
@@ -333,10 +358,144 @@ app.MapGet("/api/esp/next.txt",
                 break;
         }
 
-        // Итоговый plain-text ответ
-        var resultText = string.Join("\n", lines);
+        var finalLines = GroupArrivalLines(lines);
 
+        var resultText = string.Join("\n", finalLines);
         return Results.Text(resultText, "text/plain");
     });
+
+static List<string> GroupArrivalLines(IEnumerable<string> lines)
+{
+    // Берём только строки, которые содержат разделитель '-'
+    var parsed = lines
+        .Select(line => line.Split('-', 2, StringSplitOptions.TrimEntries))
+        .Where(parts => parts.Length == 2
+                        && !string.IsNullOrWhiteSpace(parts[0])
+                        && !string.IsNullOrWhiteSpace(parts[1]))
+        .Select(parts => (label: parts[0], minutes: parts[1]))
+        .ToList();
+
+    if (parsed.Count == 0)
+        return new List<string>();
+
+    // группируем по label
+    var grouped = parsed
+        .GroupBy(x => x.label)
+        .Select(g =>
+        {
+            // собираем список минут в одну строку: "5m, 7m, 12m"
+            var joinedMinutes = string.Join(" ", g.Select(x => x.minutes));
+            var text = $"{g.Key} - {joinedMinutes}";
+            if (text.Length > 20)
+                text = text.Substring(0, 20);
+            return text;
+
+        })
+        .ToList();
+
+    return grouped;
+}
+
+static async Task<Dictionary<string, string>> LoadTripHeadsignsAsync(
+    IEnumerable<string> tripIds,
+    CancellationToken ct)
+{
+    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    var ids = tripIds
+        .Where(id => !string.IsNullOrWhiteSpace(id))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    if (ids.Count == 0)
+        return result;
+
+    // Путь к БД: сначала пробуем GTFS_DB_PATH (Cloud Run),
+    // иначе локальный вариант (для разработки)
+    var dbPath = Environment.GetEnvironmentVariable("GTFS_DB_PATH");
+    if (string.IsNullOrWhiteSpace(dbPath))
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var solutionRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
+        var dataDir = Path.Combine(solutionRoot, "Data");
+        dbPath = Path.Combine(dataDir, "gtfs.sqlite");
+    }
+
+    var connectionString = $"Data Source={dbPath}";
+
+    await using var conn = new SqliteConnection(connectionString);
+    await conn.OpenAsync(ct);
+
+    await using var cmd = conn.CreateCommand();
+
+    var paramNames = new List<string>();
+    for (int i = 0; i < ids.Count; i++)
+    {
+        var pName = $"@p{i}";
+        paramNames.Add(pName);
+        cmd.Parameters.AddWithValue(pName, ids[i]);
+    }
+
+    cmd.CommandText = $@"
+        SELECT trip_id, trip_headsign
+        FROM trips
+        WHERE trip_id IN ({string.Join(",", paramNames)})
+    ";
+
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+    while (await reader.ReadAsync(ct))
+    {
+        var tripId = reader.GetString(0);
+        var headsign = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+        result[tripId] = headsign;
+    }
+
+    return result;
+}
+
+// Разбор строки вида
+// "South - 13A Avenue Rd towards Queen's Park"
+static (string? RouteVariant, string? Direction) ParseTripHeadsign(string? headsign)
+{
+    if (string.IsNullOrWhiteSpace(headsign))
+        return (null, null);
+
+    var parts = headsign.Split(" - ", 2, StringSplitOptions.TrimEntries);
+    if (parts.Length != 2)
+        return (null, null);
+
+    var directionRaw = parts[0];           // "South"
+    var rest = parts[1];                   // "13A Avenue Rd towards ..."
+
+    string? direction = null;
+    if (directionRaw.Equals("North", StringComparison.OrdinalIgnoreCase) ||
+        directionRaw.Equals("South", StringComparison.OrdinalIgnoreCase) ||
+        directionRaw.Equals("East", StringComparison.OrdinalIgnoreCase) ||
+        directionRaw.Equals("West", StringComparison.OrdinalIgnoreCase))
+    {
+        direction = directionRaw.Substring(0,1);
+    }
+
+    string? routeVariant = null;
+    var restParts = rest.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+    if (restParts.Length >= 1)
+    {
+        // "13A", "130B", "131", ...
+        routeVariant = restParts[0];
+    }
+
+    return (routeVariant, direction);
+}
+
+// Fallback-направление по DirectionId, если не удалось достать из headsign
+static string? DirectionFromId(int? dirId) => dirId switch
+{
+    0 => "E?",
+    1 => "W?",
+    2 => "S?",
+    3 => "N?",
+    _ => null
+};
+
 
 app.Run();

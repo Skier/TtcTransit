@@ -1,16 +1,41 @@
-﻿@model IEnumerable<TtcTransit.Web.Models.StopViewModel>
+﻿@model List<TtcTransit.Web.Models.StopViewModel>
+@using System
+@using System.Linq
+@using TtcTransit.Web.Models
 
-@{
-    var routeId = ViewBag.RouteId as string ?? "";
+@functions {
+    string GetDirectionTitle(IGrouping<int?, StopViewModel> group)
+    {
+        var names = group
+            .Select(s => s.Name ?? string.Empty)
+            .ToList();
 
-    // Группируем по направлению и сортируем
-    var groups = Model
-        .OrderBy(s => s.DirectionId ?? -1)
-        .ThenBy(s => s.Sequence)
-        .GroupBy(s => s.DirectionId ?? -1);
+        // Проверяем только окончание строки
+        bool Ends(string suffix) =>
+            names.Any(n => n.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+        string? dir = null;
+
+        if (Ends("South Side")) dir = "South";
+        else if (Ends("North Side")) dir = "North";
+        else if (Ends("East Side")) dir = "East";
+        else if (Ends("West Side")) dir = "West";
+
+        if (dir != null)
+            return $"Direction - {dir}";
+
+        // Fallback (если вдруг нет Side-остановок)
+        return group.Key switch
+        {
+            0 => "Direction 0",
+            1 => "Direction 1",
+            null => "Direction",
+            _ => $"Direction {group.Key}"
+        };
+    }
 }
 
-<h2>Stops for route @routeId</h2>
+<h2>Stops for route</h2>
 
 <p>
     <a href="@Url.Action("Index", "Home")" class="btn btn-secondary btn-sm">← Back to routes</a>
@@ -22,44 +47,35 @@
 }
 else
 {
-    @foreach (var g in groups)
+    @foreach (var dirGroup in Model.GroupBy(s => s.DirectionId))
     {
-        var dir = g.Key;
-        string dirTitle = dir switch
-        {
-            0 => "Direction 0",
-            1 => "Direction 1",
-            -1 => "No direction",
-            _ => $"Direction {dir}"
-        };
+        <h3>@GetDirectionTitle(dirGroup)</h3>
 
-        <h4>@dirTitle</h4>
-
-        <table class="table table-sm">
+        <table class="table table-sm table-striped">
             <thead>
-            <tr>
-                <th>#</th>
-                <th>Stop Id</th>
-                <th>Name</th>
-                <th>Latitude</th>
-                <th>Longitude</th>
-            </tr>
+                <tr>
+                    <th>#</th>
+                    <th>Stop Id</th>
+                    <th>Name</th>
+                    <th>Latitude</th>
+                    <th>Longitude</th>
+                </tr>
             </thead>
             <tbody>
-            @foreach (var s in g.OrderBy(x => x.Sequence))
-            {
-                <tr>
-                    <td>@s.Sequence</td>
-                    <td>@s.Id</td>
-                    <td>
-                        <a href="@Url.Action("Details", "Stop", new { id = s.Id })">
-                            @s.Name
-                        </a>
-                    </td>
-                    <td>@(s.Latitude?.ToString("F6") ?? "")</td>
-                    <td>@(s.Longitude?.ToString("F6") ?? "")</td>
-                </tr>
-            }
+                @foreach (var s in dirGroup.OrderBy(x => x.Sequence))
+                {
+                    <tr>
+                        <td>@s.Sequence</td>
+                        <td>@s.Id</td>
+                        <td>
+                            <a href="@Url.Action("Details", "Stop", new { id = s.Id })">
+                                @s.Name
+                            </a>
+                        </td>
+                        <td>@s.Latitude</td>
+                        <td>@s.Longitude</td>
+                    </tr>
+                }
             </tbody>
         </table>
     }
